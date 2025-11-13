@@ -79,44 +79,48 @@ class ISCAArchiveScraper:
         """
         sessions = []
         
-        # Find all session headers (h3 tags typically contain session names)
-        session_headers = soup.find_all(['h2', 'h3'], class_=re.compile(r'session|title'))
+        # Find all h4 tags (session headers)
+        session_headers = soup.find_all('h4')
         
-        # Alternative: Find divs or sections that contain session information
-        if not session_headers:
-            session_headers = soup.find_all(['div', 'section'], class_=re.compile(r'session'))
+        logger.info(f"Found {len(session_headers)} session headers")
         
-        logger.info(f"Found {len(session_headers)} potential session headers")
-        
-        for idx, header in enumerate(session_headers):
-            session_name = header.get_text(strip=True)
+        for idx, h4 in enumerate(session_headers):
+            session_name = h4.get_text(strip=True)
             
-            # Find papers in this session
-            # Look for the next sibling elements that contain paper links
-            papers_container = header.find_next(['div', 'ul', 'ol'])
+            # Skip if this doesn't look like a real session
+            if not session_name or len(session_name) < 3:
+                continue
             
-            if papers_container:
-                paper_links = papers_container.find_all('a', href=re.compile(r'/interspeech_2025/'))
-                
-                papers = []
-                for link in paper_links:
-                    paper_url = link.get('href')
-                    if paper_url and not paper_url.startswith('http'):
-                        paper_url = f"{self.BASE_URL}{paper_url}"
+            # Get the parent div which contains all papers for this session
+            parent_div = h4.parent
+            
+            # Find all paper links within this parent div
+            # Papers have <a> tags with href ending in .html
+            paper_links = []
+            for a_tag in parent_div.find_all('a', href=True):
+                href = a_tag.get('href')
+                # Filter for actual paper links (relative paths ending in _interspeech.html)
+                if href.endswith('.html') and '_interspeech.html' in href:
+                    # Construct full URL
+                    paper_url = f"{self.CONFERENCE_URL}{href}"
+                    paper_title = a_tag.get_text(strip=True)
                     
-                    papers.append({
-                        'title': link.get_text(strip=True),
-                        'url': paper_url
-                    })
-                
-                if papers:
-                    sessions.append({
-                        'session_id': idx,
-                        'session_name': session_name,
-                        'papers': papers
-                    })
-                    logger.info(f"Session '{session_name}': {len(papers)} papers")
+                    # Filter out the session title itself and very short titles
+                    if paper_title and len(paper_title) > 10 and paper_title != session_name:
+                        paper_links.append({
+                            'title': paper_title,
+                            'url': paper_url
+                        })
+            
+            if paper_links:
+                sessions.append({
+                    'session_id': len(sessions),  # Use actual count for ID
+                    'session_name': session_name,
+                    'papers': paper_links
+                })
+                logger.info(f"Session '{session_name}': {len(paper_links)} papers")
         
+        logger.info(f"Found {len(sessions)} sessions with papers")
         return sessions
     
     def extract_paper_metadata(self, url: str, session_info: Dict) -> Optional[Dict]:
